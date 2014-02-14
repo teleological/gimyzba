@@ -1,37 +1,55 @@
-#! /usr/bin/python
+#!/usr/bin/env python
 
-## Usage: see gismu_score.py
+# Lojban gismu candidate score evaluation script
+# Version 0.2
 
-# Get some features
-from gismu_utils import  check_for_similarity
-from cPickle import load
+# Copyright 2014 Riley Martinez-Lynch, except where
+# Copyright 2012 Arnt Richard Johansen.
+# Distributed under the terms of the GPL v3.
+
+# Usage:
+#
+#   python gismu_score.py uan rakan ekspekt esper predpologa mulud > scores.data
+#   python gismu_best.py < scores.data
+#
+
 import sys
+from cPickle import load
 
-# Load.
-scores = load(sys.stdin)
-print >>sys.stderr,"%d scores loaded." % len(scores)
+from gismu_utils import GismuDeduper
 
-# Sort.
-print >>sys.stderr,"Sorting scores..."
-scores.sort(lambda x,y:cmp(y[0],x[0]))
-print >>sys.stderr,"Done."
+def load_sorted_scores(score_file):
+  scores = load(score_file)
+  print >>sys.stderr, "%d scores loaded." % len(scores)
+  print >>sys.stderr, "Sorting scores..."
+  scores.sort(lambda x,y:cmp(y[0], x[0]))
+  return scores
 
-# Eye candy.
-print >>sys.stderr,"10 first gismu are:"
-for item in scores[:10]:
-    print >>sys.stderr,item
+if __name__ == '__main__':
 
-# Search for best match.
-print >>sys.stderr,"Exluding candidates similar to already existing gismu..."
-gismu_list = file('gismu-list')
-for (score,gismu,_) in scores:
-    if not check_for_similarity(gismu, gismu_list):
-        print >>sys.stderr,"Dropping gismu %s."%gismu
-    else:
-        print >>sys.stderr,"The winner is....\n\n\n"
-        print gismu.upper()
-        break
-else:
-    print >>sys.stderr,"No suitable gismu (duh?)"
-    
+  gismu_path = 'gismu-list.txt'
+
+  print >>sys.stderr, "Reading list of gismu..."
+  gismu_file = file(gismu_path)
+
+  scores = load_sorted_scores(sys.stdin)
+  print >>sys.stderr, ""
+  print >>sys.stderr, "10 first gismu candidates are:"
+  print >>sys.stderr, ""
+  for record in scores[:10]:
+      print >>sys.stderr, record
+
+  print >>sys.stderr, ""
+  print >>sys.stderr, "Exluding candidates similar to existing gismu..."
+  deduper = GismuDeduper(gismu_file)
+  for (score, candidate, _) in scores:
+      if deduper.has_conflict(candidate):
+          print >>sys.stderr, "Dropping candidate '%s'." % candidate
+      else:
+          print >>sys.stderr, "The winner is....\n"
+          print candidate.upper()
+          print >>sys.stderr, ""
+          break
+  else:
+      print >>sys.stderr, "No suitable candidates in top 10 scores."
 

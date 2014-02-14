@@ -1,110 +1,129 @@
-#! /usr/bin/python
+#!/usr/bin/env python
 
-## Usage:
-# python gismu_score.py uan rakan ekspekt esper predpologa mulud >scores.data
-# python gismu_best.py <scores.data
-## Dependencies:
-# - CPU time :)
-# - list of 5-letters gismu in file 'gismu-list' (one per line)
+# Lojban gismu candidate creation and evaluation script
+# Version 0.2
 
-# Native language data: need 6 words
+# Copyright 2014 Riley Martinez-Lynch, except where
+# Copyright 2012 Arnt Richard Johansen.
+# Distributed under the terms of the GPL v3.
+
+# Usage:
+#
+#   python gismu_score.py uan rakan ekspekt esper predpologa mulud > scores.data
+#   python gismu_best.py < scores.data
+#
+
 import sys
 import threading
 import Queue
-words=sys.argv[1:7]
-weights=(0.347, 0.196, 0.160, 0.123, 0.089, 0.085)
-
-# Get some features
-from gismu_utils import gen_candidates,gen_regex,compute_scores,\
-     check_for_similarity
 import anydbm
-from cPickle import loads,dumps,dump
 
-class ScoreThread(threading.Thread):
-    def __init__(self, gismuQueue, scoreQueue, db):
-        self.gismuQueue = gismuQueue
-        self.scoreQueue = scoreQueue
-        self.db = db
+from cPickle import dump
+
+from gismu_utils import GismuGenerator, GismuScorer
+
+class QueueWorker(threading.Thread):
+
+    def __init__(self, input_queue, output_queue, scorer):
+        self.input_queue = input_queue
+        self.output_queue = output_queue
+        self.scorer = scorer
         threading.Thread.__init__(self)
+
     def run(self):
-        # If there are any more gismu, process it
+        processed = 0
         while 1:
-            try:
-                gismu = self.gismuQueue.get(True, 2)
-            except Queue.Empty:
-                print >>sys.stderr, "\nThread exiting."
+            candidate = self.read_input()
+            if candidate == None:
                 break
-            tests = loads(self.db[gismu])
-            # Compute the scores and the weighted sum
-            print >>sys.stderr, gismu,
-            floats = map(float,compute_scores(tests,words))
-            total = reduce(float.__add__,map(float.__mul__,floats,weights))
-            self.scoreQueue.put((total,gismu,floats))
-            print >>sys.stderr, "\010" * 7,
-            
+            self.process_input(candidate)
 
-def compute_all_scores():
-    # Load the gismu candidate database, or build it if it does
-    # not yet exist. The database contains, for each candidate
-    # gismu, a list of weighted fnmatch-style patterns.
-    try:
-        db=anydbm.open('candidates-regex')
-        l=len(db.keys())
-    except:
-        db=anydbm.open('candidates-regex','c')
-        print >>sys.stderr,"First run only: generating candidates..."
-        candidates = gen_candidates()
-        print >>sys.stderr,"First run only: generating candidate patterns..."
-        l=len(candidates)
-        for i,gismu in enumerate(candidates):
-            if i%100==0:
-                print >>sys.stderr,'\r     \r%d%%'%int((100.*float(i)/l)),
-            db[gismu] = dumps(gen_regex(gismu),2)
-        print >>sys.stderr,"\rDone       "
-        db.close()
-        db=anydbm.open('candidates-regex')
+            processed += 1
+            print >>sys.stderr, "\010" * 9, # backspace
+            print >>sys.stderr, processed,
 
-    # Get candidate gismu list from database
-    candidates = db.keys()
-    print >>sys.stderr,"%d candidates loaded."%len(candidates)
-
-    # Compute the scores
-    print >>sys.stderr,"Computing scores..."
-    WorkQueue = Queue.Queue()
-    ScoreQueue = Queue.Queue()
-    for gismu in db.keys():
-        WorkQueue.put(gismu)
-    for x in xrange(4):
-        CurrentThread = ScoreThread(WorkQueue, ScoreQueue, db)
-        CurrentThread.start()
-    CurrentThread.join()
-    scores=[]
-    QueueEmpty = False
-    while not QueueEmpty:
+    def read_input(self):
+        candidate = None
         try:
-            scoreset = ScoreQueue.get_nowait()
-            scores.append(scoreset)
+            candidate = self.input_queue.get(True, 2) # block for up to 2s
         except Queue.Empty:
-            QueueEmpty = True
-            print >>sys.stderr, "\nEmpty queue!"
-    
-#     for i,gismu in enumerate(db.keys()):
+            pass
+        return candidate
 
-#         # Progress meter
-#         if not i%100:
-#             print >>sys.stderr,'\r       \r%4.2f%%'%(100.*float(i)/l),
+    def process_input(self, candidate):
+        weighted_score, language_scores = self.scorer.compute_score(candidate)
+        self.output_queue.put((weighted_score, candidate, language_scores))
 
-#         # Load the fnmatch patterns
-#         tests = loads(db[gismu])
-#         # Compute the scores and the weighted sum
-#         floats = map(float,compute_scores(tests,words))
-#         total = reduce(float.__add__,map(float.__mul__,floats,weights))
+##
 
-#         scores.append((total,gismu,floats))
+def read_or_generate_persisted_candidates(db_path, generator):
+    try:
+        db = anydbm.open(db_path)
+        print >>sys.stderr, "Consulting precompiled database..."
+    except:
+        print >>sys.stderr, "Generating new database..."
+        db = anydbm.open(db_path, 'c')
+        generate_and_persist_candidates(generator, db)
+        db.close()
+        db = anydbm.open(db_path)
+    return db.keys()
 
+def generate_and_persist_candidates(generator, db):
+    print >>sys.stderr, "Generating candidates..."
+    candidates = generator.generate()
+    print >>sys.stderr, "Filtering and storing candidates..."
+    for i, candidate in enumerate(candidates, 1):
+        if i % 100 == 0:
+            print >>sys.stderr, '\r     \r%d' % i,
+        db[candidate] = ""
+    print >>sys.stderr, "\rDone       "
 
-    print >>sys.stderr, "\rDone.      "
-    print dump(scores,sys.stdout,2)
+def compute_scores(candidates, scorer, number_of_workers):
+    input_queue = Queue.Queue()
+    for candidate in candidates:
+        input_queue.put(candidate)
+    output_queue = Queue.Queue()
+
+    workers = []
+    for x in xrange(number_of_workers):
+        worker = QueueWorker(input_queue, output_queue, scorer)
+        worker.start()
+        workers.append(worker)
+    for worker in workers:
+        worker.join()
+    return read_scores(output_queue)
+
+def read_scores(score_queue):
+    scores = []
+    queue_empty = False
+    while not queue_empty:
+        try:
+            score = score_queue.get_nowait()
+            scores.append(score)
+        except Queue.Empty:
+            queue_empty = True
+    return scores
 
 if __name__ == '__main__':
-    compute_all_scores()
+
+    db_path = 'candidates.db'
+
+    worker_count = 1 # performance on cpython degrades with > 1 worker
+
+    words = sys.argv[1:7]
+    for word in words:
+        if len(word) < 2:
+            raise ValueError("Input words must be at least two letters long")
+
+    generator = GismuGenerator()
+    candidates = \
+        read_or_generate_persisted_candidates(db_path, generator)
+    print >>sys.stderr, "%d candidates read." % len(candidates)
+
+    print >>sys.stderr, "Scoring candidates..."
+    scorer = GismuScorer(words)
+    scores = compute_scores(candidates, scorer, worker_count)
+
+    print >>sys.stderr, "\rDumping scores to STDOUT.      "
+    dump(scores, sys.stdout, 2)
+
