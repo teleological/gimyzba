@@ -1,6 +1,6 @@
 
 # Lojban gismu candidate generation and scoring utilities
-# Version 0.2
+# Version 0.3
 
 # Copyright 2014 Riley Martinez-Lynch, except where
 # Copyright 2012 Arnt Richard Johansen.
@@ -92,22 +92,22 @@ class GismuScorer:
     def compute_score(self, candidate):
         candidate_chrs = [ ord(x) for x in list(candidate) ]
         language_scores = self.compute_language_scores(candidate_chrs)
-        weighted_score = self.calculate_weighted_score(language_scores)
-        return weighted_score, language_scores
+        weighted_sum = self.calculate_weighted_sum(language_scores)
+        return weighted_sum, language_scores
 
     def compute_language_scores(self, candidate_chrs):
       return [ self.compute_language_score(candidate_chrs, lang_chrs) \
                  for lang_chrs in self.words_chrs ]
 
     def compute_language_score(self, candidate_chrs, lang_chrs):
-        length, path = mlpy.lcs_std(candidate_chrs, lang_chrs)
-        if length < 2:
+        lcs_length, lcs_path = mlpy.lcs_std(candidate_chrs, lang_chrs)
+        if lcs_length < 2:
             score = 0
-        elif length == 2:
-            score = self.qualified_dyad_score(path, candidate_chrs, lang_chrs)
+        elif lcs_length == 2:
+            score = self.qualified_dyad_score(lcs_path, candidate_chrs, lang_chrs)
         else:
-            score = length
-        return score
+            score = lcs_length
+        return float(score) / len(lang_chrs)
 
     def qualified_dyad_score(self, path, candidate_chrs, lang_chrs):
         candidate_chrs_distance = path[0][1] - path[0][0]
@@ -143,10 +143,9 @@ class GismuScorer:
                 break
         return score
 
-    def calculate_weighted_score(self, scores):
+    def calculate_weighted_sum(self, scores):
         # Multiply each score by the given weight, then sum weighted scores
-        return reduce(float.__add__,
-                      map(float.__mul__, map(float, scores), self.weights))
+        return reduce(float.__add__, map(float.__mul__, scores, self.weights))
 
 class GismuDeduper:
 

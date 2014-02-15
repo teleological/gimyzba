@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 # Lojban gismu candidate creation and evaluation script
-# Version 0.2
+# Version 0.3
 
 # Copyright 2014 Riley Martinez-Lynch, except where
 # Copyright 2012 Arnt Richard Johansen.
@@ -51,8 +51,8 @@ class QueueWorker(threading.Thread):
         return candidate
 
     def process_input(self, candidate):
-        weighted_score, language_scores = self.scorer.compute_score(candidate)
-        self.output_queue.put((weighted_score, candidate, language_scores))
+        weighted_sum, language_scores = self.scorer.compute_score(candidate)
+        self.output_queue.put((weighted_sum, candidate, language_scores))
 
 ##
 
@@ -116,8 +116,7 @@ if __name__ == '__main__':
             raise ValueError("Input words must be at least two letters long")
 
     generator = GismuGenerator()
-    candidates = \
-        read_or_generate_persisted_candidates(db_path, generator)
+    candidates = read_or_generate_persisted_candidates(db_path, generator)
     print >>sys.stderr, "%d candidates read." % len(candidates)
 
     print >>sys.stderr, "Scoring candidates..."

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 # Lojban gismu candidate score evaluation script
-# Version 0.2
+# Version 0.3
 
 # Copyright 2014 Riley Martinez-Lynch, except where
 # Copyright 2012 Arnt Richard Johansen.
