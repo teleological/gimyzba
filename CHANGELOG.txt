@@ -1,0 +1,44 @@
+
+Version 0.4
+
+Replaced mlpy implementation of LCS (longest common subsequence)
+algorithm with Matt Nichols' pure-python implementation to simplify
+installation and enable compatibility with python implementations
+such as pypy and jython.
+
+By default, only generating candidates from letters which appear in input
+words. This substantially reduces processing time by avoiding the calculation
+of scores for less-relevant candidates.
+
+Added command-line options to "gismu_score.py" to customize language weights,
+gismu candidate shape, gismu alphabet, and number of scoring worker threads.
+
+Output of "gismu_score.py" / input of "gismu_best.py" now uses python
+"marshal" format due to OutOfMemory errors with pickle/cPickle under
+jython.
+
+The gismu candidates DBM database used by previous versions of the script
+("candidates.db") is no longer created or consulted.
+
+----
+
+Version 0.3
+
+Corrected algorithm to factor in the length of input words per CLL: "The scores
+were divided by the length of the source-language word in its Lojbanized form"
+
+----
+
+Version 0.2
+
+Integrated mlpy implementation of LCS (longest common subsequence) algorithm
+for better performance.
+
+----
+
+Version 0.1
+
+Arnt Richard Johansen's original implementation as downloaded from:
+
+  http://www.lojban.org/tiki/gismu+scoring+algorithm
+

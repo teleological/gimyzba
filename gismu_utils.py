@@ -1,6 +1,6 @@
 
 # Lojban gismu candidate generation and scoring utilities
-# Version 0.3
+# Version 0.4
 
 # Copyright 2014 Riley Martinez-Lynch, except where
 # Copyright 2012 Arnt Richard Johansen.
@@ -8,9 +8,16 @@
 
 import sys
 import re
-import mlpy
 
 from itertools import chain, ifilter
+
+# placate python 2.5 (e.g. jython)
+if sys.version_info < (2, 6):
+    def next(iterator, default):
+        try:
+            return iterator.next()
+        except StopIteration:
+            return default
 
 C = 'bcdfgjklmnprstvxz'
 V = 'aeiou'
@@ -18,21 +25,23 @@ V = 'aeiou'
 CCVCV = [ C, C, V, C, V ]
 CVCCV = [ C, V, C, C, V ]
 
-VALID_CC_INITIALS = [ 'bl', 'br',
-                      'cf', 'ck', 'cl', 'cm', 'cn', 'cp', 'cr', 'ct',
-                      'dj', 'dr', 'dz',
-                      'fl', 'fr',
-                      'gl', 'gr',
-                      'jb', 'jd', 'jg', 'jm', 'jv',
-                      'kl', 'kr',
-                      'ml', 'mr',
-                      'pl', 'pr',
-                      'sf', 'sk', 'sl', 'sm', 'sn', 'sp', 'sr', 'st',
-                      'tc', 'tr', 'ts',
-                      'vl', 'vr',
-                      'xl', 'xr',
-                      'zb', 'zd', 'zg',
-                      'zm', 'zv' ]
+VALID_CC_INITIALS = [
+  'bl', 'br',
+  'cf', 'ck', 'cl', 'cm', 'cn', 'cp', 'cr', 'ct',
+  'dj', 'dr', 'dz',
+  'fl', 'fr',
+  'gl', 'gr',
+  'jb', 'jd', 'jg', 'jm', 'jv',
+  'kl', 'kr',
+  'ml', 'mr',
+  'pl', 'pr',
+  'sf', 'sk', 'sl', 'sm', 'sn', 'sp', 'sr', 'st',
+  'tc', 'tr', 'ts',
+  'vl', 'vr',
+  'xl', 'xr',
+  'zb', 'zd', 'zg',
+  'zm', 'zv'
+]
 
 FORBIDDEN_CC = [ 'cx', 'kx', 'xc', 'xk', 'mz' ]
 
@@ -40,143 +49,184 @@ SIBILANT = 'cjsz'
 VOICED   = 'bdgvz'
 UNVOICED = 'cfkpstx'
 
-SIMILARITIES = { 'b':'pv',
-                 'c':'js',
-                 'd':'t',
-                 'f':'pv',
-                 'g':'kx',
-                 'j':'cz',
-                 'k':'gx',
-                 'l':'r',
-                 'm':'n',
-                 'n':'m',
-                 'p':'bf',
-                 'r':'l',
-                 's':'cz',
-                 't':'d',
-                 'v':'bf',
-                 'x':'gk',
-                 'z':'js' }
+SIMILARITIES = {
+  'b':'pv',
+  'c':'js',
+  'd':'t',
+  'f':'pv',
+  'g':'kx',
+  'j':'cz',
+  'k':'gx',
+  'l':'r',
+  'm':'n',
+  'n':'m',
+  'p':'bf',
+  'r':'l',
+  's':'cz',
+  't':'d',
+  'v':'bf',
+  'x':'gk',
+  'z':'js'
+}
 
-# Per CLL 4.14: http://dag.github.io/cll/4/14
-LANGUAGE_WEIGHTS = (0.347, 0.196, 0.160, 0.123, 0.089, 0.085)
+LANGUAGE_WEIGHTS = {
+
+  # Sources:
+  #
+  #   http://dag.github.io/cll/4/14
+  #   http://www.lojban.org/files/etymology/langstat.94
+  #   http://www.lojban.org/files/etymology/langstat.95
+  #   http://www.lojban.org/files/etymology/langstat.99
+  #
+  # Order: Chinese, Hindi, English, Spanish, Russian, Arabic
+
+  1985 : (0.360, 0.160, 0.210, 0.110, 0.090, 0.070), # per CLL
+  1987 : (0.360, 0.156, 0.208, 0.116, 0.087, 0.073),
+  1994 : (0.348, 0.194, 0.163, 0.123, 0.088, 0.084),
+  1995 : (0.347, 0.196, 0.160, 0.123, 0.089, 0.085), # Default
+  1999 : (0.334, 0.195, 0.187, 0.116, 0.081, 0.088)
+
+}
 
 XADD = lambda a,b: [x+y for x in a for y in b]
 
+# LCS implementation adapted from python dynamic programming example at:
+#   http://rosettacode.org/wiki/Longest_common_subsequence
+
+def lcs_length(a, b):
+    return lcs_matrix(a, b)[-1][-1]
+
+def lcs_matrix(a, b):
+    matrix = [[0 for j in range(len(b)+1)] for i in range(len(a)+1)]
+    for i, x in enumerate(a):
+        for j, y in enumerate(b):
+            if x == y:
+                matrix[i+1][j+1] = matrix[i][j] + 1
+            else:
+                matrix[i+1][j+1] = max(matrix[i+1][j], matrix[i][j+1])
+    return matrix
+
 class GismuGenerator:
 
-    def __init__(self, cc_shape = CCVCV, cv_shape = CVCCV):
-      self.cc_shape = cc_shape
-      self.cv_shape = cv_shape
+    def __init__(self, c, v, shape_strings):
+        self.c = c
+        self.v = v
+        self.shape_strings = shape_strings
 
-    def generate(self):
-        return chain(ifilter(self.check_cc_initials, reduce(XADD, self.cc_shape)),
-                     ifilter(self.check_cv_internals, reduce(XADD, self.cv_shape)))
+    def iterator(self):
+        iterators = [ self.shape_iterator(str) for str in self.shape_strings ]
+        return chain(*iterators)
 
-    def check_cc_initials(self, candidate):
-        return candidate[:2] in VALID_CC_INITIALS
+    def shape_iterator(self, shape_string):
+        shape = self.shape_for_string(shape_string)
+        validator = self.shape_validator(shape_string)
+        return ifilter(validator, reduce(XADD, shape))
 
-    def check_cv_internals(self, candidate):
-        return candidate[2] != candidate[3] and \
-          not (candidate[2] in VOICED   and candidate[3] in UNVOICED) and \
-          not (candidate[2] in UNVOICED and candidate[3] in VOICED  ) and \
-          not (candidate[2] in SIBILANT and candidate[3] in SIBILANT) and \
-          candidate[2:4] not in FORBIDDEN_CC
+    def shape_for_string(self, string):
+        shape = []
+        for letter in list(string.lower()):
+          if letter == 'c':
+              shape.append(self.c)
+          elif letter == 'v':
+              shape.append(self.v)
+        return shape
+
+    def shape_validator(self, shape_string):
+        predicates = []
+        for match in re.finditer('cc', shape_string, re.I):
+            i = match.start()
+            if i == 0:
+                test = lambda x: x[:2] in VALID_CC_INITIALS
+                predicates.append(test)
+            else:
+                j = i + 1
+                test = lambda x: x[i] != x[j] and \
+                  not (x[i] in VOICED   and x[j] in UNVOICED) and \
+                  not (x[i] in UNVOICED and x[j] in VOICED  ) and \
+                  not (x[i] in SIBILANT and x[j] in SIBILANT) and \
+                  x[i:j + 1] not in FORBIDDEN_CC
+                predicates.append(test)
+        return self.validator_for_predicates(predicates)
+
+    def validator_for_predicates(self, predicates):
+        if len(predicates) == 0:
+            return lambda x: True
+        elif len(predicates) == 1:
+            return predicates[0]
+        else:
+            return lambda x: \
+              not next((True for p in predicates if p(x) == False), False)
 
 class GismuScorer:
 
-    def __init__(self, language_words, weights = LANGUAGE_WEIGHTS):
-        self.words_chrs = [ [ ord(y) for y in list(x) ] for x in language_words ]
+    def __init__(self, input_words, weights):
+        self.input_words_chars = [ [ y for y in list(x) ] for x in input_words ]
         self.weights = weights
 
     def compute_score(self, candidate):
-        candidate_chrs = [ ord(x) for x in list(candidate) ]
-        language_scores = self.compute_language_scores(candidate_chrs)
-        weighted_sum = self.calculate_weighted_sum(language_scores)
-        return weighted_sum, language_scores
+        similarity_scores = self.compute_similarity_scores(candidate)
+        weighted_sum = self.calculate_weighted_sum(similarity_scores)
+        return weighted_sum, similarity_scores
 
-    def compute_language_scores(self, candidate_chrs):
-      return [ self.compute_language_score(candidate_chrs, lang_chrs) \
-                 for lang_chrs in self.words_chrs ]
+    def compute_similarity_scores(self, candidate):
+      chars = [ x for x in list(candidate) ]
+      return [ self.compute_similarity_score(candidate, chars, word_chars) \
+               for word_chars in self.input_words_chars ]
 
-    def compute_language_score(self, candidate_chrs, lang_chrs):
-        lcs_length, lcs_path = mlpy.lcs_std(candidate_chrs, lang_chrs)
-        if lcs_length < 2:
+    def compute_similarity_score(self, candidate, candidate_chars, input_chars):
+        lcs_len = lcs_length(candidate_chars, input_chars)
+        if lcs_len < 2:
             score = 0
-        elif lcs_length == 2:
-            score = self.qualified_dyad_score(lcs_path, candidate_chrs, lang_chrs)
+        elif lcs_len == 2:
+            score = self.score_dyad_by_pattern(candidate, ''.join(input_chars))
         else:
-            score = lcs_length
-        return float(score) / len(lang_chrs)
+            score = lcs_len
+        return float(score) / len(input_chars)
 
-    def qualified_dyad_score(self, path, candidate_chrs, lang_chrs):
-        candidate_chrs_distance = path[0][1] - path[0][0]
-        path_chrs_distance = path[1][1] - path[1][0]
-        if candidate_chrs_distance == 1 and path_chrs_distance == 1:
-            score = 2
-        elif candidate_chrs_distance == 2 and path_chrs_distance == 2:
-            score = 2
-        else:
-            score = self.score_dyad_by_regex(candidate_chrs, lang_chrs)
-        return score
+    def score_dyad_by_pattern(self, candidate, input_word):
+        patterns = self.gismu_dyad_patterns(candidate)
+        return 2 if self.matches_any_pattern(patterns, input_word) else 0
 
-    def score_dyad_by_regex(self, candidate_chrs, lang_chrs):
-        patterns = self.gismu_dyad_patterns(candidate_chrs)
-        lang_word = self.chrs_to_string(lang_chrs)
-        return self.score_for_regex(patterns, lang_word, 2)
+    def gismu_dyad_patterns(self, gismu):
+        patterns = []
+        for i, c in enumerate(gismu[:-2]):
+            patterns.append('%s(%s|.%s)' % (c, gismu[i + 1], gismu[i + 2]))
+        patterns.append('%s%s' % (gismu[-2], gismu[-1]))
+        return patterns
 
-    def gismu_dyad_patterns(self, candidate_chrs):
-        g, i, s, m, u = [ chr(x) for x in candidate_chrs ]
-        return [ '%s(%s|.%s)' % (g,i,s),
-                 '%s(%s|.%s)' % (i,s,m),
-                 '%s(%s|.%s)' % (s,m,u),
-                 '%s%s' % (m,u) ]
-
-    def chrs_to_string(self, chrs):
-        return ''.join([ chr(x) for x in chrs ])
-
-    def score_for_regex(self, patterns, word, value):
-        score = 0
-        for pattern in patterns:
-            if re.search(pattern, word):
-                score = value
-                break
-        return score
+    def matches_any_pattern(self, patterns, word):
+        return next((True for pat in patterns if re.search(pat, word)), False)
 
     def calculate_weighted_sum(self, scores):
         # Multiply each score by the given weight, then sum weighted scores
         return reduce(float.__add__, map(float.__mul__, scores, self.weights))
 
-class GismuDeduper:
+class GismuMatcher:
 
     def __init__(self, gismu_list, stem_length = 4):
         self.gismu_list = gismu_list
         self.stem_length = stem_length
 
-    def has_conflict(self, candidate):
+    def find_similar_gismu(self, candidate):
         candidate = candidate.rstrip()
-        similarity_pattern = map(lambda x:SIMILARITIES.get(x, '.'), candidate)
+        patterns = map(lambda x:SIMILARITIES.get(x, '.'), candidate)
         # e.g. "rekpa" =~ /l.[gx][bf]./ where . matches NOTHING
 
-        err = False
         gismu = None
+        found_match = False
         self.gismu_list.seek(0)
         for gismu in self.gismu_list:
             gismu = gismu.rstrip()
-            err = self.compare_with_gismu(candidate, similarity_pattern, gismu)
-            if err:
+            found_match = self.match_gismu(gismu, candidate, patterns)
+            if found_match:
                 break
+        return gismu if found_match else None
 
-        if err:
-            print >>sys.stderr, '%s conflicts with gismu %s'% (candidate, gismu)
+    def match_gismu(self, gismu, candidate, structural_patterns):
+        return self.match_stem(gismu, candidate) or \
+          self.match_structure(gismu, candidate, structural_patterns)
 
-        return err
-
-    def compare_with_gismu(self, candidate, gismu, similarity_pattern):
-        return self.compare_gismu_stem(candidate, gismu) or \
-          self.compare_gismu_structure(candidate, gismu, similarity_pattern)
-
-    def compare_gismu_stem(self, candidate, gismu):
+    def match_stem(self, gismu, candidate):
         return candidate[:self.stem_length] == gismu[:self.stem_length]
 
     # Apply similarity pattern to each position in gismu if others letters equal
@@ -187,12 +237,12 @@ class GismuDeduper:
     # rek/PAT/a
     # rekp/PAT/
     #
-    def compare_gismu_structure(self, candidate, gismu, similarity_pattern):
+    def match_structure(self, gismu, candidate, structural_patterns):
         similar = False
         common_len = min(len(candidate), len(gismu))
         for i in xrange(common_len):
-            if self.strings_match_except(candidate, gismu, i, common_len) and \
-              self.test_pattern(gismu[i], similarity_pattern[i]):
+            if self.strings_match_except(gismu, candidate, i, common_len) and \
+              self.match_structural_pattern(gismu[i], structural_patterns[i]):
                 similar = True
                 break
         return similar
@@ -200,7 +250,7 @@ class GismuDeduper:
     def strings_match_except(self, x, y, i, j):
       return x[:i] == y[:i] and x[i+1:j] == y[i+1:j]
 
-    def test_pattern(self, letter, pattern):
+    def match_structural_pattern(self, letter, pattern):
         if pattern == '.':
             return False
         return letter in pattern

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 # Lojban gismu candidate score evaluation script
-# Version 0.3
+# Version 0.4
 
 # Copyright 2014 Riley Martinez-Lynch, except where
 # Copyright 2012 Arnt Richard Johansen.
@@ -13,26 +13,18 @@
 #   python gismu_best.py < scores.data
 #
 
+import platform
 import sys
-from cPickle import load
 
-from gismu_utils import GismuDeduper
+from marshal import load
 
-def load_sorted_scores(score_file):
-  scores = load(score_file)
-  print >>sys.stderr, "%d scores loaded." % len(scores)
+from gismu_utils import GismuMatcher
+
+def main(scores, gismu_file):
+
   print >>sys.stderr, "Sorting scores..."
   scores.sort(lambda x,y:cmp(y[0], x[0]))
-  return scores
 
-if __name__ == '__main__':
-
-  gismu_path = 'gismu-list.txt'
-
-  print >>sys.stderr, "Reading list of gismu..."
-  gismu_file = file(gismu_path)
-
-  scores = load_sorted_scores(sys.stdin)
   print >>sys.stderr, ""
   print >>sys.stderr, "10 first gismu candidates are:"
   print >>sys.stderr, ""
@@ -41,15 +33,29 @@ if __name__ == '__main__':
 
   print >>sys.stderr, ""
   print >>sys.stderr, "Exluding candidates similar to existing gismu..."
-  deduper = GismuDeduper(gismu_file)
+  matcher = GismuMatcher(gismu_file)
   for (score, candidate, _) in scores:
-      if deduper.has_conflict(candidate):
-          print >>sys.stderr, "Dropping candidate '%s'." % candidate
-      else:
+      gismu = matcher.find_similar_gismu(candidate)
+      if gismu == None:
           print >>sys.stderr, "The winner is....\n"
           print candidate.upper()
           print >>sys.stderr, ""
           break
+      else:
+          print >>sys.stderr, \
+            "Candidate '%s' too much like gismu '%s'." % (candidate, gismu)
   else:
       print >>sys.stderr, "No suitable candidates in top 10 scores."
+
+if __name__ == '__main__':
+
+    gismu_path = 'gismu-list.txt'
+    print >>sys.stderr, "Reading list of gismu... "
+    gismu_file = file(gismu_path)
+
+    print >>sys.stderr, "Loading scores... ",
+    scores = load(sys.stdin)
+    print >>sys.stderr, "%d scores loaded." % len(scores)
+
+    main(scores, gismu_file)
 
