@@ -133,20 +133,21 @@ class GismuGenerator:
 
     def shape_validator(self, shape_string):
         predicates = []
-        for match in re.finditer('cc', shape_string, re.I):
-            i = match.start()
-            if i == 0:
-                test = lambda x: x[:2] in VALID_CC_INITIALS
-                predicates.append(test)
-            else:
-                j = i + 1
-                test = lambda x: x[i] != x[j] and \
-                  not (x[i] in VOICED   and x[j] in UNVOICED) and \
-                  not (x[i] in UNVOICED and x[j] in VOICED  ) and \
-                  not (x[i] in SIBILANT and x[j] in SIBILANT) and \
-                  x[i:j + 1] not in FORBIDDEN_CC
-                predicates.append(test)
+        for i, c in enumerate(shape_string[:-1].lower()):
+            if (c == 'c') and (shape_string[i+1] == 'c'):
+                predicates.append(self.validator_for_consonant_cluster(i))
         return self.validator_for_predicates(predicates)
+
+    def validator_for_consonant_cluster(self, i):
+        if i == 0:
+            return lambda x: x[:2] in VALID_CC_INITIALS
+        else:
+            j = i + 1
+            return lambda x: x[i] != x[j] and \
+              not (x[i] in VOICED   and x[j] in UNVOICED) and \
+              not (x[i] in UNVOICED and x[j] in VOICED  ) and \
+              not (x[i] in SIBILANT and x[j] in SIBILANT) and \
+              x[i:j + 1] not in FORBIDDEN_CC
 
     def validator_for_predicates(self, predicates):
         if len(predicates) == 0:
