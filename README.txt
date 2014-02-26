@@ -10,7 +10,11 @@ USAGE
 =====
 
 To generate scored gismu candidates, run the "gismu_score.py" program,
-passing as arguments phonetically lojbanized words. Gismu candidates
+passing as arguments phonetically lojbanized words.
+
+  python gismu_score.py uan rakan ekspekt esper predpologa mulud
+
+The top ten highest scoring candidates will be displayed. Candidates
 are scored according to resemblance to the input words, with additional
 consideration given to languages which are more widely spoken in the
 world. The default languages and and weighting factors, as derived from
@@ -22,17 +26,6 @@ the 1995 Encyclopedia Brittanica Book of the Year, are:
     Spanish     0.123
     Russian     0.089
     Arabic      0.085
-
-The output (STDERR) of the program is a serialized ("marshaled") sequence of
-tuples which should be redirected into a file for further processing, e.g.:
-
-  python gismu_score.py uan rakan ekspekt esper predpologa mulud > scores.data
-
-To interpret the results of the "scores.data" file, feed it as input to
-"gismu_best.py", e.g.:
-
-  python gismu_best.py < scores.data
-
 
 OPTIONS
 =======
@@ -58,6 +51,20 @@ The --number-workers (-n) option controls the number of python scoring threads
 to use. This may only be useful with python implementations which don't use
 a GIL (Global Interpreter Lock) such as jython.
 
+The --deduplicate (-d) option accepts a path to file containing a list of
+pre-existing gismu, one per line (e.g "gismu-list.txt"). Candidates will be
+matched against the gismu in this file; candidates that are deemed similar
+to existing gismu will be disqualified.
+
+The --output (-o) option accepts a filepath. All candidates, along with their
+scores will be written to this path. The format is serialized ("marshaled")
+tuples, and may be passed as input to "gismu_best.py", e.g.:
+
+  python gismu_best.py < scores.data
+
+The --quiet (-q) option suppresses the display of progress while scores
+are being calculated.
+
 CHANGES
 =======
 
@@ -68,6 +75,12 @@ LICENSE
 
 The scripts and modules in this implementation may be copied, modified,
 and distributed under the terms of the GNU General Public License v3.
-
 For details, see "LICENSE.txt".
+
+"gismu-list.txt" contains public domain content furnished by:
+
+  Logical Language Group, Inc.
+  2904 Beau Lane
+  Fairfax, VA 22031
+  USA
 

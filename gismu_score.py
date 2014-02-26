@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 # Lojban gismu candidate creation and evaluation script
-# Version 0.4
+# Version 0.5
 
 # Copyright 2014 Riley Martinez-Lynch, except where
 # Copyright 2012 Arnt Richard Johansen.
@@ -9,8 +9,7 @@
 
 # Usage:
 #
-#   python gismu_score.py uan rakan ekspekt esper predpologa mulud > scores.data
-#   python gismu_best.py < scores.data
+#   python gismu_score.py uan rakan ekspekt esper predpologa mulud
 #
 
 import sys
@@ -20,13 +19,14 @@ import Queue
 
 from optparse import OptionParser
 
-from gismu_utils import C, V, LANGUAGE_WEIGHTS, GismuGenerator, GismuScorer
+from gismu_utils import C, V, LANGUAGE_WEIGHTS, \
+  GismuGenerator, GismuScorer, GismuMatcher
 
 from marshal import dump
 
-VERSION = "v0.4"
+VERSION = "v0.5"
 
-DEFAULT_LANGUAGE_WEIGHTS = LANGUAGE_WEIGHTS[1995] # as they appear in CLL
+DEFAULT_LANGUAGE_WEIGHTS = LANGUAGE_WEIGHTS['1995'] # as they appear in CLL
 
 def main(words, params):
 
@@ -48,45 +48,72 @@ def main(words, params):
     candidates = list(candidate_iterator)
     print >>sys.stderr, "%d candidates generated." % len(candidates)
 
-    weights = [ float(weight) for weight in re.split("\s*,\s*", params.weights) ]
+    weights = [float(weight) for weight in re.split("\s*,\s*", params.weights)]
 
     scorer = GismuScorer(words, weights)
     if params.workers == 1:
         print >>sys.stderr, "Scoring candidates..."
-        scores = compute_scores(candidates, scorer)
+        scores = compute_scores(candidates, scorer, params)
     else:
-        print >>sys.stderr, "Scoring candidates with %d workers..." % params.workers
-        scores = compute_scores_threaded(candidates, scorer, params.workers)
+        print >>sys.stderr, \
+          "Scoring candidates with %d workers..." % params.workers
+        scores = compute_scores_threaded(candidates, scorer, params)
 
-    print >>sys.stderr, "\rDumping scores to STDOUT."
-    dump(scores, sys.stdout)
+    print >>sys.stderr, "Sorting scores..."
+    scores.sort(lambda x,y:cmp(y[0], x[0]))
+
+    print >>sys.stderr, ""
+    print >>sys.stderr, "10 first gismu candidates are:"
+    print >>sys.stderr, ""
+    for record in scores[:10]:
+        print >>sys.stderr, record
+
+    if params.gismu_list_path:
+        print >>sys.stderr, "Reading list of gismu... "
+        gismus = [line.strip() for line in file(params.gismu_list_path)]
+        matcher = GismuMatcher(gismus)
+        print >>sys.stderr, "Exluding candidates similar to existing gismu..."
+        candidate = deduplicate_candidates(matcher, scores)
+        if candidate == None:
+            print >>sys.stderr, "No suitable candidates found."
+        else:
+            print >>sys.stderr, "The winner is....\n"
+            print candidate.upper()
+
+    if params.output_path:
+        print >>sys.stderr, "\rDumping scores to %s" % params.output_path
+        sink = open(params.output_path, 'w')
+        dump(scores, sink)
+        sink.close()
 
 def letters_for_words(words):
     word_set = set([ l for word in words for l in list(word) ])
     return word_set.intersection(C), word_set.intersection(V)
 
-def compute_scores(candidates, scorer):
+def compute_scores(candidates, scorer, params):
+    quiet = params.quiet
     scores = []
     for i, candidate in enumerate(candidates):
         score = compute_score(scorer, candidate)
         scores.append(score)
-        print >>sys.stderr, "\010" * 9, # backspace
-        print >>sys.stderr, i + 1,
+        if (not quiet) and (i % 100 == 0):
+            print >>sys.stderr, "\010" * 9, # backspace
+            print >>sys.stderr, i + 1,
     return scores
 
 def compute_score(scorer, candidate):
     weighted_sum, language_scores = scorer.compute_score(candidate)
     return (weighted_sum, candidate, language_scores)
 
-def compute_scores_threaded(candidates, scorer, number_of_workers):
+def compute_scores_threaded(candidates, scorer, params):
     input_queue = Queue.Queue()
     for candidate in candidates:
         input_queue.put(candidate)
     output_queue = Queue.Queue()
 
     workers = []
-    for x in xrange(number_of_workers):
-        worker = QueueWorker(input_queue, output_queue, scorer)
+    for x in xrange(params.workers):
+        worker = QueueWorker(input_queue, output_queue, scorer, params)
         worker.start()
         workers.append(worker)
     for worker in workers:
@@ -104,27 +131,42 @@ def read_scores_from_queue(score_queue):
             queue_empty = True
     return scores
 
+def deduplicate_candidates(matcher, scores):
+    unique_candidate = None
+    for (score, candidate, _) in scores:
+        gismu = matcher.find_similar_gismu(candidate)
+        if gismu == None:
+            unique_candidate = candidate
+            break
+        else:
+            print >>sys.stderr, \
+              "Candidate '%s' too much like gismu '%s'." % (candidate, gismu)
+    return unique_candidate
+
 ##
 
 class QueueWorker(threading.Thread):
 
-    def __init__(self, input_queue, output_queue, scorer):
+    def __init__(self, input_queue, output_queue, scorer, params):
         self.input_queue = input_queue
         self.output_queue = output_queue
         self.scorer = scorer
+        self.params = params
         threading.Thread.__init__(self)
 
     def run(self):
-        processed = 0
+        quiet = self.params.quiet
+        i = 0
         while 1:
             candidate = self.read_input()
             if candidate == None:
                 break
             self.process_input(candidate)
 
-            processed += 1
-            print >>sys.stderr, "\010" * 9, # backspace
-            print >>sys.stderr, processed,
+            i += 1
+            if (not quiet) and (i % 100 == 0):
+                print >>sys.stderr, "\010" * 9, # backspace
+                print >>sys.stderr, i,
 
     def read_input(self):
         candidate = None
@@ -141,11 +183,10 @@ class QueueWorker(threading.Thread):
 ##
 
 def check_weights_option(option, opt_str, value, parser):
-    if re.match('\d{4}$', value):
-        year = int(value)
-        if year in LANGUAGE_WEIGHTS:
-            print >>sys.stderr, "Using language weights from %d..." % year
-            value = ",".join([ str(x) for x in LANGUAGE_WEIGHTS[year] ])
+    if re.match('(\d{4}|finprims)$', value):
+        if value in LANGUAGE_WEIGHTS:
+            print >>sys.stderr, "Using language weights from %s..." % value
+            value = ",".join([ str(x) for x in LANGUAGE_WEIGHTS[value] ])
         else:
             raise ValueError("No weights registered for %d" % year)
     else:
@@ -187,20 +228,31 @@ if __name__ == '__main__':
     usage_fmt = "usage: %prog [ options ] { input words }"
     options = OptionParser(usage=usage_fmt, version="%prog " + VERSION)
 
+    options.add_option("-q", "--quiet",
+                       action="store_true", dest="quiet")
+
     options.add_option("-a", "--all-letters",
                        action="store_true", dest="all_letters")
 
     default_weights = ",".join([ str(x) for x in DEFAULT_LANGUAGE_WEIGHTS ])
     options.add_option("-w", "--weights",
                        default=default_weights, dest="weights",
-                       type="string", action="callback", callback=check_weights_option)
+                       type="string", action="callback",
+                       callback=check_weights_option)
 
     options.add_option("-s", "--shapes",
                        default="ccvcv,cvccv", dest="shapes",
-                       type="string", action="callback", callback=check_shapes_option)
+                       type="string", action="callback",
+                       callback=check_shapes_option)
 
     options.add_option("-n", "--number-workers",
                        type="int", default="1", dest="workers")
+
+    options.add_option("-d", "--deduplicate",
+                       type="string", dest="gismu_list_path")
+
+    options.add_option("-o", "--output",
+                       type="string", dest="output_path")
 
     error = False
 

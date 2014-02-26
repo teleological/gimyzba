@@ -1,4 +1,17 @@
 
+Version 0.5
+
+Added candidate evaluation to "gismu_score.py".
+
+When generate candidates with custom shapes, excluding forbidden
+consonant triples. Also excluding internal sequences which could be
+mistaken for "ccvcv" gismu.
+
+Deduplication and serialization of candidates are now options which are
+disabled by default.
+
+----
+
 Version 0.4
 
 Replaced mlpy implementation of LCS (longest common subsequence)

@@ -1,6 +1,6 @@
 
 # Lojban gismu candidate generation and scoring utilities
-# Version 0.4
+# Version 0.5
 
 # Copyright 2014 Riley Martinez-Lynch, except where
 # Copyright 2012 Arnt Richard Johansen.
@@ -43,7 +43,9 @@ VALID_CC_INITIALS = [
   'zm', 'zv'
 ]
 
-FORBIDDEN_CC = [ 'cx', 'kx', 'xc', 'xk', 'mz' ]
+FORBIDDEN_CC  = [ 'cx', 'kx', 'xc', 'xk', 'mz' ]
+
+FORBIDDEN_CCC = [ 'ndj', 'ndz', 'ntc', 'nts' ]
 
 SIBILANT = 'cjsz'
 VOICED   = 'bdgvz'
@@ -71,20 +73,20 @@ SIMILARITIES = {
 
 LANGUAGE_WEIGHTS = {
 
-  # Sources:
-  #
-  #   http://dag.github.io/cll/4/14
-  #   http://www.lojban.org/files/etymology/langstat.94
-  #   http://www.lojban.org/files/etymology/langstat.95
-  #   http://www.lojban.org/files/etymology/langstat.99
-  #
   # Order: Chinese, Hindi, English, Spanish, Russian, Arabic
 
-  1985 : (0.360, 0.160, 0.210, 0.110, 0.090, 0.070), # per CLL
-  1987 : (0.360, 0.156, 0.208, 0.116, 0.087, 0.073),
-  1994 : (0.348, 0.194, 0.163, 0.123, 0.088, 0.084),
-  1995 : (0.347, 0.196, 0.160, 0.123, 0.089, 0.085), # Default
-  1999 : (0.334, 0.195, 0.187, 0.116, 0.081, 0.088)
+  '1985'     : (0.360, 0.160, 0.210, 0.110, 0.090, 0.070),
+  # http://dag.github.io/cll/4/14
+
+  '1987'     : (0.360, 0.156, 0.208, 0.116, 0.087, 0.073),
+  '1994'     : (0.348, 0.194, 0.163, 0.123, 0.088, 0.084),
+  # http://www.lojban.org/files/etymology/langstat.94
+
+  '1995'     : (0.347, 0.196, 0.160, 0.123, 0.089, 0.085), # default
+  # http://www.lojban.org/files/etymology/langstat.95
+
+  '1999'     : (0.334, 0.195, 0.187, 0.116, 0.081, 0.088)
+  # http://www.lojban.org/files/etymology/langstat.99
 
 }
 
@@ -131,14 +133,20 @@ class GismuGenerator:
               shape.append(self.v)
         return shape
 
-    def shape_validator(self, shape_string):
+    def shape_validator(self, shape):
         predicates = []
-        for i, c in enumerate(shape_string[:-1].lower()):
-            if (c == 'c') and (shape_string[i+1] == 'c'):
-                predicates.append(self.validator_for_consonant_cluster(i))
+        slen = len(shape)
+        for i, c in enumerate(shape[:-1].lower()):
+            if (c == 'c'):
+                if (shape[i+1] == 'c'):
+                    predicates.append(self.validator_for_cc(i))
+                    if (i < (slen-2)) and (shape[i+2] == 'c'):
+                        predicates.append(self.validator_for_ccc(i))
+                    if (i < (slen-4)) and (i>0) and (shape[i:i+5] == 'ccvcv'):
+                        predicates.append(self.invalidator_for_initial_cc(i))
         return self.validator_for_predicates(predicates)
 
-    def validator_for_consonant_cluster(self, i):
+    def validator_for_cc(_, i):
         if i == 0:
             return lambda x: x[:2] in VALID_CC_INITIALS
         else:
@@ -149,7 +157,13 @@ class GismuGenerator:
               not (x[i] in SIBILANT and x[j] in SIBILANT) and \
               x[i:j + 1] not in FORBIDDEN_CC
 
-    def validator_for_predicates(self, predicates):
+    def validator_for_ccc(_, i):
+        return lambda x: x[i:i+3] not in FORBIDDEN_CCC
+
+    def invalidator_for_initial_cc(_, i):
+        return lambda x: x[i:i+2] not in VALID_CC_INITIALS
+
+    def validator_for_predicates(_, predicates):
         if len(predicates) == 0:
             return lambda x: True
         elif len(predicates) == 1:
@@ -188,14 +202,14 @@ class GismuScorer:
         patterns = self.gismu_dyad_patterns(candidate)
         return 2 if self.matches_any_pattern(patterns, input_word) else 0
 
-    def gismu_dyad_patterns(self, gismu):
+    def gismu_dyad_patterns(_, gismu):
         patterns = []
         for i, c in enumerate(gismu[:-2]):
             patterns.append('%s(%s|.%s)' % (c, gismu[i + 1], gismu[i + 2]))
         patterns.append('%s%s' % (gismu[-2], gismu[-1]))
         return patterns
 
-    def matches_any_pattern(self, patterns, word):
+    def matches_any_pattern(_, patterns, word):
         return next((True for pat in patterns if re.search(pat, word)), False)
 
     def calculate_weighted_sum(self, scores):
@@ -204,8 +218,8 @@ class GismuScorer:
 
 class GismuMatcher:
 
-    def __init__(self, gismu_list, stem_length = 4):
-        self.gismu_list = gismu_list
+    def __init__(self, gismus, stem_length = 4):
+        self.gismus = gismus
         self.stem_length = stem_length
 
     def find_similar_gismu(self, candidate):
@@ -215,9 +229,7 @@ class GismuMatcher:
 
         gismu = None
         found_match = False
-        self.gismu_list.seek(0)
-        for gismu in self.gismu_list:
-            gismu = gismu.rstrip()
+        for gismu in self.gismus:
             found_match = self.match_gismu(gismu, candidate, patterns)
             if found_match:
                 break
@@ -248,10 +260,10 @@ class GismuMatcher:
                 break
         return similar
 
-    def strings_match_except(self, x, y, i, j):
+    def strings_match_except(_, x, y, i, j):
       return x[:i] == y[:i] and x[i+1:j] == y[i+1:j]
 
-    def match_structural_pattern(self, letter, pattern):
+    def match_structural_pattern(_, letter, pattern):
         if pattern == '.':
             return False
         return letter in pattern
