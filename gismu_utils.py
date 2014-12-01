@@ -48,7 +48,7 @@ FORBIDDEN_CC  = [ 'cx', 'kx', 'xc', 'xk', 'mz' ]
 FORBIDDEN_CCC = [ 'ndj', 'ndz', 'ntc', 'nts' ]
 
 SIBILANT = 'cjsz'
-VOICED   = 'bdgvz'
+VOICED   = 'bdgjvz'
 UNVOICED = 'cfkpstx'
 
 SIMILARITIES = {
